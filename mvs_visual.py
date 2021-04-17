@@ -19,10 +19,10 @@ from plotly.subplots import make_subplots
 class PerspectiveCamera(NamedTuple):
     # properties in wh order.
     focal_length: Tuple[float]
-    principal_point: Tuple[float]
     image_size: Tuple[int]
     # in opengl format.
     c2w: np.ndarray  # (4, 4)
+    principal_point: Optional[Tuple[float]] = None
 
 
 class AxisArgs(NamedTuple):
@@ -43,6 +43,12 @@ class Lighting(NamedTuple):
     roughness: float = 0.5
     facenormalsepsilon: float = 1e-6
     vertexnormalsepsilon: float = 1e-12
+
+
+class Segment(NamedTuple):
+    points: np.ndarray  # (J, 3)
+    parents: Optional[np.ndarray] = None  # (J,)
+    colors: Optional[Union[List, np.ndarray]] = None  # (3,) or (J, 3)
 
 
 def get_camera_wireframe(scale: float = 0.3):
@@ -139,6 +145,7 @@ def plot_scene(
                 trimesh.Trimesh,
                 PerspectiveCamera,
                 Tuple[PerspectiveCamera, np.ndarray],
+                Segment,
             ],
         ],
     ],
@@ -156,6 +163,9 @@ def plot_scene(
     camera_image_opacity = kwargs.get('camera_img_opacity', 1)
     camera_image_scale_size = kwargs.get('camera_img_scale_size', 1 / 4)
     show_camera_wireframe = kwargs.get('show_camera_wireframe', True)
+    marker_size = kwargs.get('marker_size', 2)
+    segment_size = kwargs.get('segment_size', 1)
+    show_segment = kwargs.get('show_segment', True)
 
     # Set axis arguments to defaults defined at the top of this file
     x_settings = {**axis_args_dict}
@@ -197,6 +207,17 @@ def plot_scene(
                     camera_scale,
                     show_camera_wireframe=show_camera_wireframe,
                 )
+            elif isinstance(struct, Segment):
+                _add_segment_trace(
+                    fig,
+                    struct,
+                    trace_name,
+                    subplot_idx,
+                    ncols,
+                    marker_size=marker_size,
+                    segment_size=segment_size,
+                    show_segment=show_segment,
+                )
             elif isinstance(struct, tuple):
                 camera, image = struct
                 _add_camera_trace(
@@ -214,8 +235,8 @@ def plot_scene(
             else:
                 raise ValueError(
                     (
-                        'struct {} is not a PerspectiveCamera, Trimesh '
-                        'or a Tuple[PerspectiveCamera, Image] object'
+                        'struct {} is not a PerspectiveCamera, Segment, '
+                        'Trimesh or a Tuple[PerspectiveCamera, Image] object'
                     ).format(struct)
                 )
 
@@ -297,7 +318,7 @@ def _add_mesh_trace(
 
     Args:
         fig: plotly figure to add the trace within.
-        mesh: Trimesh object to render. It can be batched.
+        mesh: Trimesh object to render.
         trace_name: name to label the trace with.
         subplot_idx: identifies the subplot, with 0 being the top left.
         ncols: the number of subplots per row.
@@ -331,6 +352,7 @@ def _add_mesh_trace(
             lighting=lighting,
             name=trace_name,
             opacity=opacity,
+            showlegend=True,
         ),
         row=row,
         col=col,
@@ -341,7 +363,7 @@ def _add_mesh_trace(
     current_layout = fig['layout'][plot_scene]
 
     # update the bounds of the axes for the current trace
-    max_expand = (verts.max(0)[0] - verts.min(0)[0]).max()
+    max_expand = (verts.max(0) - verts.min(0)).max()
     _update_axes_bounds(verts_center, max_expand, current_layout)
 
 
@@ -352,7 +374,7 @@ def _add_camera_trace(
     subplot_idx: int,
     ncols: int,
     camera_scale: float,
-    image: Optional[np.ndarray],
+    image: Optional[np.ndarray] = None,
     marker_size: int = 1,
     image_scale_size: float = 1 / 4,
     show_camera_wireframe: bool = True,
@@ -364,7 +386,7 @@ def _add_camera_trace(
 
     Args:
         fig: plotly figure to add the trace within.
-        camera: the PerspectiveCamera object to render. It can be batched.
+        camera: the PerspectiveCamera object to render.
         trace_name: name to label the trace with.
         subplot_idx: identifies the subplot, with 0 being the top left.
         ncols: the number of sublpots per row.
@@ -382,7 +404,13 @@ def _add_camera_trace(
     if show_camera_wireframe:
         fig.add_trace(
             go.Scatter3d(  # pyre-ignore [16]
-                x=x, y=y, z=z, marker={'size': 1}, name=f'{trace_name}/img'
+                x=x,
+                y=y,
+                z=z,
+                marker={'size': 1},
+                name=trace_name,
+                showlegend=False,
+                legendgroup=trace_name,
             ),
             row=row,
             col=col,
@@ -419,8 +447,9 @@ def _add_camera_trace(
                     'size': marker_size,
                 },
                 mode='markers',
-                name=f'{trace_name}/wire',
+                name=trace_name,
                 opacity=image_opacity,
+                legendgroup=trace_name,
             ),
             row=row,
             col=col,
@@ -433,9 +462,119 @@ def _add_camera_trace(
     flattened_wires = cam_wires_trans
     if not show_camera_wireframe:
         flattened_wires = plane_pts_trans.reshape(-1, 3)
-    verts_center = flattened_wires.mean(0)
-    max_expand = (flattened_wires.max(0)[0] - flattened_wires.min(0)[0]).max()
-    _update_axes_bounds(verts_center, max_expand, current_layout)
+    points_center = flattened_wires.mean(0)
+    max_expand = (flattened_wires.max(0) - flattened_wires.min(0)).max()
+    _update_axes_bounds(points_center, max_expand, current_layout)
+
+
+def _add_segment_trace(
+    fig: go.Figure,
+    segment: Segment,
+    trace_name: str,
+    subplot_idx: int,
+    ncols: int,
+    marker_size: int,
+    segment_size: Optional[int] = None,
+    show_segment: bool = True,
+):
+    """
+    Adds a trace rendering a segment object to the passed in figure, with
+    a given name and in a specific subplot.
+    Args:
+        fig: plotly figure to add the trace within.
+        segment: Segment object to render.
+        trace_name: name to label the trace with.
+        subplot_idx: identifies the subplot, with 0 being the top left.
+        ncols: the number of subplots per row.
+        marker_size: the size of the rendered points
+    """
+    points = segment.points
+    parents = segment.parents
+    colors = segment.colors
+
+    if colors is not None:
+        if isinstance(colors, List):
+            colors = np.array(colors, dtype=np.uint8)[None].repeat(
+                points.shape[0], axis=0
+            )
+        if colors.shape[1] == 3:
+            template = 'rgb(%d, %d, %d)'
+            colors = [template % (r, g, b) for r, g, b in colors]
+        else:
+            raise NotImplementedError('Only support RGB segments right now.')
+
+    row = subplot_idx // ncols + 1
+    col = subplot_idx % ncols + 1
+    if not show_segment:
+        # just show the point cloud.
+        fig.add_trace(
+            go.Scatter3d(  # pyre-ignore[16]
+                x=points[:, 0],
+                y=points[:, 1],
+                z=points[:, 2],
+                marker={'color': colors, 'size': marker_size},
+                mode='markers',
+                name=trace_name,
+            ),
+            row=row,
+            col=col,
+        )
+    else:
+        if segment_size is None:
+            segment_size = int(np.ceil(marker_size * 0.5))
+        if parents is not None:
+            fig.add_trace(
+                go.Scatter3d(  # pyre-ignore[16]
+                    x=points[:, 0],
+                    y=points[:, 1],
+                    z=points[:, 2],
+                    marker={'color': colors, 'size': marker_size},
+                    mode='markers',
+                    name=trace_name,
+                    legendgroup=trace_name,
+                ),
+                row=row,
+                col=col,
+            )
+            for p, j in zip(parents[1:], np.arange(parents.shape[0])[1:]):
+                fig.add_trace(
+                    go.Scatter3d(  # pyre-ignore[16]
+                        x=points[[p, j], 0],
+                        y=points[[p, j], 1],
+                        z=points[[p, j], 2],
+                        line={
+                            'color': [colors[p], colors[j]],
+                            'width': segment_size,
+                        },
+                        showlegend=False,
+                        mode='lines',
+                        legendgroup=trace_name,
+                    ),
+                    row=row,
+                    col=col,
+                )
+        else:
+            fig.add_trace(
+                go.Scatter3d(  # pyre-ignore[16]
+                    x=points[:, 0],
+                    y=points[:, 1],
+                    z=points[:, 2],
+                    marker={'color': colors, 'size': marker_size},
+                    line={'color': colors, 'width': segment_size},
+                    name=trace_name,
+                ),
+                row=row,
+                col=col,
+            )
+
+    # Access the current subplot's scene configuration
+    plot_scene = 'scene' + str(subplot_idx + 1)
+    current_layout = fig['layout'][plot_scene]
+
+    # update the bounds of the axes for the current trace
+    points_center = points.mean(0)
+    max_expand = (points.max(0) - points.min(0)).max()
+    _update_axes_bounds(points_center, max_expand, current_layout)
 
 
 def _gen_fig_with_subplots(

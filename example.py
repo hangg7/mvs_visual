@@ -49,7 +49,7 @@ focal_length = (
 principal_point = (200, 200)
 
 # bunny mesh has following orientation for +x/y/z axes: left/up/forward.
-bunny_tmesh = trimesh.load('asset/bunny.ply')
+bunny_tmesh = trimesh.load('assets/bunny.ply')
 # recenter and rescale mesh such that the longest bound has length 1.
 bunny_tmesh.vertices -= bunny_tmesh.vertices.mean(axis=0, keepdims=True)
 bounds = bunny_tmesh.bounds

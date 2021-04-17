@@ -31,4 +31,16 @@ This visualization toolkit is largely inspired by the pytorch3D [example](https:
 
 I changed everything to OpenGL camera format (right/up/back corresponding to +x/y/z in camera frame) and dropped the support for pytorch3D cameras, thus using trimesh + pyrender for rendering etc.
 
-Currently only support rendering mesh, camera wireframes along with the images.
+Currently support rendering meshes, camera wireframes along with the images,
+point clouds, line segments, and 3D skeletons.
+
+## Known issues
+1. Currently only support isotropic imaging, meaning cameras are expected to
+   have equal heights and weights, equal focals along both x/y directions, and
+   equal principal points at the center of the image.
+2. Currently only support OpenGL format camera. Supporting different camera
+   formats will be nice, including Pytorch3D, Blender, OpenCV etc.
+3. Subplots will become pretty small if there are more than 4 (2x2). This is an
+   issue related to plotly without any open solution as far as I know.
+
+Issues and PR are welcomed.
