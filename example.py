@@ -42,11 +42,8 @@ N = 3
 img_wh = (400, 400)
 assert img_wh[0] == img_wh[1], 'Only isotropic imaging is supported.'
 yfov = np.pi / 3
-focal_length = (
-    focal_from_fov(yfov, img_wh[0]),
-    focal_from_fov(yfov, img_wh[1]),
-)
-principal_point = (200, 200)
+focals = (focal_from_fov(yfov, img_wh[0]), focal_from_fov(yfov, img_wh[1]))
+principal_points = (200, 200)
 
 # bunny mesh has following orientation for +x/y/z axes: left/up/forward.
 bunny_tmesh = trimesh.load('assets/bunny.ply')
@@ -86,14 +83,14 @@ for i, c2w in enumerate(c2ws):
     scene.set_pose(camera_node, pose=c2w)
     img = r.render(scene)[0]
     cv2.imwrite(f'view{i}.png', img[..., ::-1])
-    plot_dict['bunny'][f'view{i}'] = (
-        PerspectiveCamera(
-            focal_length=focal_length,
-            principal_point=principal_point,
+    plot_dict['bunny'][f'view{i}'] = dict(
+        struct=PerspectiveCamera(
+            focals=focals,
             image_size=img_wh,
             c2w=c2w,
+            principal_points=principal_points,
         ),
-        img,
+        image=img,
     )
 fig = plot_scene(plot_dict, camera_scale=0.3)
 fig.write_html('example.html')
